@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#111827">
+    <title>Calculadora de Viaje al Aeropuerto</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .node-circle { transition: all 0.3s ease; }
+        .node-label { font-size: 11px; font-weight: bold; text-anchor: middle; pointer-events: none; user-select: none; }
+        .edge-line { transition: all 0.3s ease; }
+        .edge-label { 
+            font-size: 13px;
+            font-weight: bold; 
+            text-anchor: middle; 
+            pointer-events: none; 
+            user-select: none;
+            paint-order: stroke;
+            stroke: #111827; /* gray-900 */
+            stroke-width: 3px;
+            stroke-linecap: butt;
+            stroke-linejoin: miter;
+        }
+        .log-entry { border-left: 3px solid transparent; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body class="bg-gray-800 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-7xl bg-gray-900 rounded-xl shadow-lg p-6">
+        <div class="text-center mb-4">
+            <h1 class="text-2xl md:text-3xl font-bold text-cyan-400">Calculadora de Viaje al Aeropuerto</h1>
+            <p class="text-gray-400 mt-1">Calcula a qué hora salir de casa usando el Algoritmo de Dijkstra</p>
+        </div>
+
+        <div class="bg-gray-800 p-4 rounded-lg mb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            <div>
+                <label for="start-point" class="block text-sm font-medium text-gray-300">📍 Punto de Origen</label>
+                <select id="start-point" class="w-full mt-1 bg-gray-700 text-white border border-gray-600 rounded-lg px-3 py-2"></select>
+            </div>
+            <div>
+                <label for="arrival-time" class="block text-sm font-medium text-gray-300">✈️ Hora Límite en Aeropuerto</label>
+                <input type="time" id="arrival-time" class="w-full mt-1 bg-gray-700 text-white border border-gray-600 rounded-lg px-3 py-2" value="18:00">
+            </div>
+            <div>
+                <label for="buffer-time" class="block text-sm font-medium text-gray-300">⏱️ Margen de Seguridad (min)</label>
+                <input type="number" id="buffer-time" class="w-full mt-1 bg-gray-700 text-white border border-gray-600 rounded-lg px-3 py-2" value="20">
+            </div>
+            <button id="calculate-btn" class="btn w-full bg-green-500 hover:bg-green-600 font-bold py-2 px-4 rounded-lg h-10">Calcular Hora de Salida</button>
+        </div>
+        
+        <div id="results-container" class="hidden bg-gray-800 p-4 rounded-lg mb-4 text-center">
+             <h2 class="text-xl font-bold text-yellow-400">Debes salir de casa a las: <span id="departure-time-output" class="text-2xl">--:--</span></h2>
+             <p class="text-md font-semibold text-gray-200 mt-3">Ruta Óptima Calculada:</p>
+             <p id="route-output" class="text-sm text-cyan-400 font-mono tracking-wide"></p>
+             <div id="time-breakdown" class="mt-3 text-sm text-gray-300"></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-black rounded-lg w-full aspect-video lg:aspect-auto flex items-center justify-center p-2 relative">
+                <svg id="graph-svg" class="w-full h-full"></svg>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <h3 class="font-bold text-lg mb-2 text-center">Bitácora de Decisiones del Algoritmo</h3>
+                <div id="log-container" class="overflow-y-auto bg-gray-900 rounded-md p-2" style="max-height: 500px;">
+                    <p class="text-gray-500 text-center p-4">La bitácora aparecerá aquí al calcular la ruta.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('ServiceWorker registrado con éxito:', registration.scope);
+        }).catch(error => {
+            console.log('Fallo en el registro del ServiceWorker:', error);
+        });
+    });
+}
+
+const nodes = {
+    'N_AIJCH_NUEVO': { x: 400, y: 150, label: 'Aeropuerto', isOrigin: false },
+    'N_LAVICTORIA_INICIO': { x: 800, y: 450, label: 'La Victoria', isOrigin: true },
+    'N_LOSOLIVOS_FIN': { x: 100, y: 550, label: 'Los Olivos', isOrigin: true },
+    'N_MIRAFLORES_INICIO': { x: 850, y: 250, label: 'Miraflores', isOrigin: true },
+    'N_SJM_INICIO': {x: 900, y: 550, label: 'SJM', isOrigin: true },
+    'N_ATE_INICIO': {x: 950, y: 350, label: 'Ate', isOrigin: true },
+    'N_FAUCETT_MORALES': { x: 450, y: 250, label: 'Faucett/Morales', isOrigin: false },
+    'N_FAUCETT_VENEZUELA': { x: 550, y: 350, label: 'Faucett/Venezuela', isOrigin: false },
+    'N_FAUCETT_MARINA': { x: 650, y: 300, label: 'Faucett/La Marina', isOrigin: false },
+    'N_FAUCETT_TOMASVALLE': { x: 300, y: 450, label: 'Faucett/T. Valle', isOrigin: false },
+    'N_MORALES_SANTAROSA': { x: 350, y: 100, label: 'Morales/Sta. Rosa', isOrigin: false },
+    'N_LINEAAMARILLA_SALIDA': { x: 600, y: 50, label: 'Salida L. Amarilla', isOrigin: false },
+    'N_GRAU_INICIO': { x: 750, y: 400, label: 'Plaza Grau', isOrigin: false },
+    'N_JAVIERPRADO_AREQUIPA': { x: 900, y: 300, label: 'J. Prado/Arequipa', isOrigin: false },
+    'N_TOMASVALLE_PANNORTE': { x: 200, y: 500, label: 'T. Valle/Pan. Norte', isOrigin: false },
+    'N_PTE_NUEVO': { x: 850, y: 150, label: 'Puente Nuevo', isOrigin: false }
+};
+const edges = [
+    { from: 'N_ATE_INICIO', to: 'N_PTE_NUEVO', dist: 5.0, speed: 40 },
+    { from: 'N_PTE_NUEVO', to: 'N_GRAU_INICIO', dist: 6.0, speed: 50 },
+    { from: 'N_GRAU_INICIO', to: 'N_LINEAAMARILLA_SALIDA', dist: 9.0, speed: 70 },
+    { from: 'N_LINEAAMARILLA_SALIDA', to: 'N_MORALES_SANTAROSA', dist: 1.5, speed: 40 },
+    { from: 'N_SJM_INICIO', to: 'N_JAVIERPRADO_AREQUIPA', dist: 10.0, speed: 45 },
+    { from: 'N_JAVIERPRADO_AREQUIPA', to: 'N_FAUCETT_MARINA', dist: 8.0, speed: 40 },
+    { from: 'N_MIRAFLORES_INICIO', to: 'N_FAUCETT_MARINA', dist: 7.0, speed: 40 },
+    { from: 'N_LAVICTORIA_INICIO', to: 'N_GRAU_INICIO', dist: 2.5, speed: 30 },
+    { from: 'N_FAUCETT_MARINA', to: 'N_FAUCETT_VENEZUELA', dist: 2.0, speed: 50 },
+    { from: 'N_FAUCETT_VENEZUELA', to: 'N_FAUCETT_MORALES', dist: 3.5, speed: 50 },
+    { from: 'N_FAUCETT_MORALES', to: 'N_AIJCH_NUEVO', dist: 1.2, speed: 40 },
+    { from: 'N_MORALES_SANTAROSA', to: 'N_AIJCH_NUEVO', dist: 1.0, speed: 40 },
+    { from: 'N_LOSOLIVOS_FIN', to: 'N_TOMASVALLE_PANNORTE', dist: 3.0, speed: 45 },
+    { from: 'N_TOMASVALLE_PANNORTE', to: 'N_FAUCETT_TOMASVALLE', dist: 5.0, speed: 40},
+    { from: 'N_FAUCETT_TOMASVALLE', to: 'N_FAUCETT_MORALES', dist: 2.8, speed: 50 }
+];
+const allEdges = [...edges];
+edges.forEach(e => allEdges.push({ from: e.to, to: e.from, dist: e.dist, speed: e.speed }));
+
+const congestionFactors = [
+    { start: 0, end: 6, factor: 1.1, label: 'Tráfico ligero' },
+    { start: 7, end: 9, factor: 2.8, label: 'Hora Punta Mañana' },
+    { start: 10, end: 16, factor: 1.6, label: 'Tráfico moderado' },
+    { start: 17, end: 20, factor: 3.0, label: 'Hora Punta Tarde' },
+    { start: 21, end: 23, factor: 1.8, label: 'Tráfico nocturno' }
+];
+
+const svg = document.getElementById('graph-svg');
+const startPointSelect = document.getElementById('start-point');
+const calculateBtn = document.getElementById('calculate-btn');
+const logContainer = document.getElementById('log-container');
+
+function populateStartPoints() {
+    startPointSelect.innerHTML = '';
+    Object.keys(nodes).forEach(id => {
+        if (nodes[id].isOrigin) {
+            const option = document.createElement('option');
+            option.value = id;
+            option.textContent = nodes[id].label;
+            startPointSelect.appendChild(option);
+        }
+    });
+}
+
+function drawGraph(path = [], costs = {}) {
+    svg.innerHTML = '';
+    const viewBox = { x: 0, y: 0, width: 1000, height: 600 };
+    svg.setAttribute('viewBox', `${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`);
+
+    edges.forEach(edge => {
+        const p1 = nodes[edge.from];
+        const p2 = nodes[edge.to];
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.id = `edge-${edge.from}-${edge.to}`;
+        line.setAttribute('x1', p1.x); line.setAttribute('y1', p1.y);
+        line.setAttribute('x2', p2.x); line.setAttribute('y2', p2.y);
+        line.setAttribute('stroke', '#4B5563'); line.setAttribute('stroke-width', '2');
+        svg.appendChild(line);
+
+        const distLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        distLabel.setAttribute('x', (p1.x + p2.x) / 2);
+        distLabel.setAttribute('y', (p1.y + p2.y) / 2 - 8);
+        distLabel.setAttribute('class', 'edge-label');
+        distLabel.setAttribute('fill', '#9CA3AF');
+        distLabel.textContent = `${edge.dist.toFixed(1)} km`;
+        svg.appendChild(distLabel);
+    });
+
+    Object.keys(nodes).forEach(id => {
+        const node = nodes[id];
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.id = `node-${id}`;
+        circle.setAttribute('cx', node.x); circle.setAttribute('cy', node.y);
+        circle.setAttribute('r', '20');
+        circle.setAttribute('stroke', '#6B7280'); circle.setAttribute('stroke-width', '2');
+        circle.setAttribute('fill', '#1F2937');
+        const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        label.setAttribute('x', node.x); label.setAttribute('y', node.y + 32);
+        label.setAttribute('class', 'node-label');
+        label.setAttribute('fill', '#D1D5DB');
+        label.textContent = node.label;
+        group.appendChild(circle);
+        group.appendChild(label);
+        svg.appendChild(group);
+    });
+    
+    if (path.length > 0) {
+        for (let i = 0; i < path.length - 1; i++) {
+            const u = path[i];
+            const v = path[i+1];
+            const edgeLine = document.getElementById(`edge-${u}-${v}`) || document.getElementById(`edge-${v}-${u}`);
+            if (edgeLine) {
+                 edgeLine.setAttribute('stroke', '#FBBF24');
+                 edgeLine.setAttribute('stroke-width', '4');
+            }
+            const p1 = nodes[u];
+            const p2 = nodes[v];
+            const timeText = `${costs[`${u}-${v}`] || costs[`${v}-${u}`] || 0} min`;
+            const timeLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            timeLabel.setAttribute('x', (p1.x + p2.x) / 2);
+            timeLabel.setAttribute('y', (p1.y + p2.y) / 2 + 16);
+            timeLabel.setAttribute('class', 'edge-label');
+            timeLabel.setAttribute('fill', '#FBBF24');
+            timeLabel.textContent = timeText;
+            svg.appendChild(timeLabel);
+        }
+        path.forEach(nodeId => {
+            const circle = document.getElementById(`node-${nodeId}`);
+            if (nodeId === path[0]) circle.setAttribute('fill', '#10B981');
+            else if (nodeId === path[path.length - 1]) circle.setAttribute('fill', '#EF4444');
+            else circle.setAttribute('fill', '#3B82F6');
+        });
+    }
+}
+
+function getCongestionFactor(hour) {
+    const entry = congestionFactors.find(c => hour >= c.start && hour <= c.end);
+    return entry || { factor: 1.0, label: 'Tráfico normal' };
+}
+
+function runDijkstra(graph, startNode, endNode) {
+    let distances = {};
+    let predecessors = {};
+    let openSet = [{ node: startNode, dist: 0 }];
+    let visited = new Set();
+    logContainer.innerHTML = '';
+    for (const nodeId in graph) {
+        distances[nodeId] = Infinity;
+        predecessors[nodeId] = null;
+    }
+    distances[startNode] = 0;
+    addToLog(`🌳 [RAÍZ] Iniciando en ${nodes[startNode].label} (Costo: 0)`);
+    logDistanceState(distances, visited, startNode);
+    while(openSet.length > 0) {
+        openSet.sort((a, b) => a.dist - b.dist);
+        const { node: currentNodeId } = openSet.shift();
+        if (visited.has(currentNodeId)) continue;
+        visited.add(currentNodeId);
+        if (currentNodeId === endNode) break;
+        let logHtml = `<div class="log-entry log-entry-current bg-gray-700 p-3 rounded-lg mt-2"><p class="font-bold text-lg">🌳 Visitando ${nodes[currentNodeId].label} (Costo: ${distances[currentNodeId].toFixed(1)} min)</p><div class="pl-4 mt-2 space-y-2 border-l-2 border-gray-600">`;
+        for (const neighborId in graph[currentNodeId]) {
+            if (visited.has(neighborId)) continue;
+            const weight = graph[currentNodeId][neighborId];
+            const newDist = distances[currentNodeId] + weight;
+            logHtml += `<div class="text-sm"><p class="font-semibold text-gray-300">+-- Evaluando vecino ${nodes[neighborId].label}:</p><div class="pl-5 text-gray-400"><p>| Costo Nuevo: ${distances[currentNodeId].toFixed(1)} + ${weight.toFixed(1)} = ${newDist.toFixed(1)}</p><p>| Costo Anterior: ${distances[neighborId] === Infinity ? '∞' : distances[neighborId].toFixed(1)}</p>`;
+            if (newDist < distances[neighborId]) {
+                distances[neighborId] = newDist;
+                predecessors[neighborId] = currentNodeId;
+                openSet.push({ node: neighborId, dist: newDist });
+                logHtml += `<p class="font-bold text-green-400">| +-> Decisión: [MEJORA] Nueva distancia a ${nodes[neighborId].label} es ${newDist.toFixed(1)}.</p></div></div>`;
+            } else {
+                logHtml += `<p class="font-bold text-red-400">| +-> Decisión: [NO MEJORA].</p></div></div>`;
+            }
+        }
+        logHtml += `</div></div>`;
+        addToLog(logHtml);
+        logDistanceState(distances, visited, startNode);
+    }
+    let path = [];
+    let current = endNode;
+    while (current) {
+        path.unshift(current);
+        current = predecessors[current];
+    }
+    return path[0] === startNode ? { path, distance: distances[endNode] } : { path: [], distance: Infinity };
+}
+
+function addToLog(html) {
+    logContainer.innerHTML += html;
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function logDistanceState(distances, visited, startNode) {
+    let stateHtml = '<div class="mt-2 text-xs p-2 bg-gray-900/50 rounded"><p class="font-semibold mb-1">Estado de Distancias:</p><div class="grid grid-cols-3 gap-1">';
+    const sortedNodes = Object.keys(nodes).sort();
+    for (const nodeId of sortedNodes) {
+        const dist = distances[nodeId];
+        const distText = dist === Infinity ? '∞' : dist.toFixed(1);
+        const isVisited = visited.has(nodeId) || nodeId === startNode;
+        const colorClass = isVisited ? 'text-green-400 font-bold' : 'text-gray-400';
+        stateHtml += `<div class="${colorClass}"><span>${nodes[nodeId].label.substring(0,10)}:</span> ${distText}</div>`;
+    }
+    stateHtml += '</div></div>';
+    addToLog(stateHtml);
+}
+
+function calculate() {
+    const startNodeId = document.getElementById('start-point').value;
+    const arrivalTimeInput = document.getElementById('arrival-time').value;
+    const userBuffer = parseInt(document.getElementById('buffer-time').value) || 0;
+    const taxiWaitTime = 12;
+    const internalAirportTime = 20;
+    if (!arrivalTimeInput) {
+        alert("Por favor, selecciona una hora límite de llegada al aeropuerto.");
+        return;
+    }
+    const [arrivalHour, arrivalMinute] = arrivalTimeInput.split(':').map(Number);
+    let requiredArrivalDate = new Date();
+    requiredArrivalDate.setHours(arrivalHour, arrivalMinute, 0, 0);
+    const congestion = getCongestionFactor(arrivalHour);
+    const graph = {};
+    const edgeCosts = {};
+    for(const id in nodes) graph[id] = {};
+    allEdges.forEach(edge => {
+        const travelTime = (edge.dist / (edge.speed / congestion.factor)) * 60;
+        graph[edge.from][edge.to] = travelTime;
+        edgeCosts[`${edge.from}-${edge.to}`] = travelTime.toFixed(1);
+    });
+    const { path, distance: travelTime } = runDijkstra(graph, startNodeId, 'N_AIJCH_NUEVO');
+    if (travelTime === Infinity) {
+        document.getElementById('results-container').classList.remove('hidden');
+        document.getElementById('departure-time-output').textContent = "ERROR";
+        document.getElementById('time-breakdown').textContent = "No se encontró una ruta válida desde el origen seleccionado.";
+        document.getElementById('route-output').textContent = "";
+        drawGraph();
+        return;
+    }
+    let departureDate = new Date(requiredArrivalDate.getTime());
+    const totalOffset = travelTime + taxiWaitTime + userBuffer + internalAirportTime;
+    departureDate.setMinutes(departureDate.getMinutes() - totalOffset);
+    document.getElementById('results-container').classList.remove('hidden');
+    const finalTime = departureDate.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: true });
+    document.getElementById('departure-time-output').textContent = finalTime;
+    const routeAsText = path.map(nodeId => nodes[nodeId].label).join(' → ');
+    document.getElementById('route-output').textContent = routeAsText;
+    document.getElementById('time-breakdown').innerHTML = `Tiempo de Viaje: <b>${travelTime.toFixed(0)} min</b> | Espera Taxi: <b>${taxiWaitTime} min</b> | Procesos en Aeropuerto: <b>${internalAirportTime} min</b> | Tu Margen: <b>${userBuffer} min</b>`;
+    drawGraph(path, edgeCosts);
+}
+
+populateStartPoints();
+drawGraph();
+calculateBtn.addEventListener('click', calculate);
+</script>
+</body>
+</html>
